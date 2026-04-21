@@ -1,4 +1,4 @@
-import csv
+import json
 import sys
 import os
 from dotenv import load_dotenv
@@ -13,50 +13,22 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localho
 engine = create_engine(DATABASE_URL)
 Session = sessionmaker(bind=engine)
 
-COL_MAP = {
-    "name": ["name", "Name", "full_name", "full name"],
-    "gender": ["gender", "Gender"],
-    "gender_probability": ["gender_probability", "Gender Probability", "gender probability", "genderProbability"],
-    "age": ["age", "Age"],
-    "age_group": ["age_group", "Age Group", "age group", "ageGroup"],
-    "country_id": ["country_id", "Country ID", "country_code", "countryId", "country id"],
-    "country_name": ["country_name", "Country Name", "country", "countryName", "country name"],
-    "country_probability": ["country_probability", "Country Probability", "country probability", "countryProbability"],
-}
 
-
-def resolve_columns(header: list) -> dict:
-    mapping = {}
-    header_lower = {h: h.lower().strip() for h in header}
-
-    for field, aliases in COL_MAP.items():
-        for col in header:
-            if col in aliases or col.strip() in aliases or header_lower[col] in [a.lower() for a in aliases]:
-                mapping[field] = col
-                break
-
-    missing = [f for f in COL_MAP if f not in mapping]
-    if missing:
-        print(f"WARNING: Could not find columns for: {missing}")
-        print(f"Available columns: {header}")
-    return mapping
-
-
-def seed(csv_path: str):
-    if not os.path.exists(csv_path):
-        print(f"ERROR: File not found: {csv_path}")
+def seed(json_path: str):
+    if not os.path.exists(json_path):
+        print(f"ERROR: File not found: {json_path}")
         sys.exit(1)
 
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
+    with open(json_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    rows = data.get("profiles", [])
 
     if not rows:
-        print("ERROR: CSV file is empty.")
+        print("ERROR: No profiles found in JSON file.")
         sys.exit(1)
 
-    col = resolve_columns(list(rows[0].keys()))
-    print(f"Column mapping: {col}")
+    print(f"Found {len(rows)} profiles to seed...")
 
     db = Session()
     inserted = 0
@@ -66,15 +38,6 @@ def seed(csv_path: str):
     try:
         for i, row in enumerate(rows, 1):
             try:
-                name = row[col["name"]].strip()
-                gender = row[col["gender"]].strip().lower()
-                gender_probability = float(row[col["gender_probability"]])
-                age = int(float(row[col["age"]]))
-                age_group = row[col["age_group"]].strip().lower()
-                country_id = row[col["country_id"]].strip().upper()
-                country_name = row[col["country_name"]].strip()
-                country_probability = float(row[col["country_probability"]])
-
                 stmt = text("""
                     INSERT INTO profiles
                         (id, name, gender, gender_probability, age, age_group,
@@ -87,14 +50,14 @@ def seed(csv_path: str):
 
                 result = db.execute(stmt, {
                     "id": str(uuid7()),
-                    "name": name,
-                    "gender": gender,
-                    "gender_probability": gender_probability,
-                    "age": age,
-                    "age_group": age_group,
-                    "country_id": country_id,
-                    "country_name": country_name,
-                    "country_probability": country_probability,
+                    "name": row["name"].strip(),
+                    "gender": row["gender"].strip().lower(),
+                    "gender_probability": float(row["gender_probability"]),
+                    "age": int(row["age"]),
+                    "age_group": row["age_group"].strip().lower(),
+                    "country_id": row["country_id"].strip().upper(),
+                    "country_name": row["country_name"].strip(),
+                    "country_probability": float(row["country_probability"]),
                 })
 
                 if result.rowcount > 0:
@@ -104,7 +67,7 @@ def seed(csv_path: str):
 
             except Exception as e:
                 errors += 1
-                print(f"  Row {i} error: {e} | data: {dict(row)}")
+                print(f"  Row {i} error: {e} | data: {row}")
 
             if i % 100 == 0:
                 db.commit()
@@ -128,8 +91,8 @@ def seed(csv_path: str):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python seed.py <path-to-csv>")
-        print("Example: python seed.py profiles.csv")
+        print("Usage: python seed.py <path-to-json>")
+        print("Example: python seed.py seed_profiles.json")
         sys.exit(1)
 
     seed(sys.argv[1])
